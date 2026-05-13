@@ -1,0 +1,16 @@
+
+> allo-health@0.1.0 lint
+> eslint
+
+
+/Users/yogi/Documents/allo-health/app/api/products/route.ts
+  6:44  warning  '_req' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/yogi/Documents/allo-health/app/api/warehouses/route.ts
+  6:44  warning  '_req' is defined but never used  @typescript-eslint/no-unused-vars
+
+/Users/yogi/Documents/allo-health/lib/with-error-handler.ts
+  9:49  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 3 problems (1 error, 2 warnings)
+

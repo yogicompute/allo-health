@@ -5,6 +5,7 @@ import {
   ReservationNotFoundError,
 } from "./errors";
 import { prisma } from "./prisma";
+import getRedis from './redis';
 
 const TTL_MS = parseInt(process.env.RESERVATION_TTL_MS ?? "600000"); // 10 Min default
 
@@ -14,7 +15,7 @@ export async function createReservation(
   quantity: number,
 ) {
   // --> a trans for checkign enf stock + race condition (LAST UNIT) => serial
-  return await prisma.$transaction(async (tx) => {
+  const reservation = await prisma.$transaction(async (tx) => {
     const affectedRows = await tx.$executeRaw`
         UPDATE "Stock"
         SET "reservedUnits" = "reservedUnits" + ${quantity}
@@ -34,10 +35,28 @@ export async function createReservation(
       },
     });
   });
+  
+  // track in redis (best-effort)
+  try {
+    await trackReservationInRedis(reservation.id, reservation.expiresAt)
+  } catch {}
+
+  return reservation
+}
+
+// track reservation in Redis sorted set for quick expiry checks (score = ms timestamp)
+async function trackReservationInRedis(reservationId: string, expiresAt: Date) {
+  const redis = getRedis()
+  if (!redis) return
+  try {
+    await redis.zadd('reservations', { score: expiresAt.getTime(), member: reservationId })
+  } catch (err) {
+    console.error('[REDIS] failed to track reservation', err)
+  }
 }
 
 export async function confirmReservation(id: string) {
-  return await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const reservation = await tx.reservation.findUnique({ where: { id } });
 
     if (!reservation) throw new ReservationNotFoundError();
@@ -66,10 +85,17 @@ export async function confirmReservation(id: string) {
       include: { product: true, warehouse: true },
     });
   });
+
+  const redis = getRedis()
+  if (redis) {
+    try { await redis.zrem('reservations', id) } catch { /* ignore */ }
+  }
+
+  return result
 }
 
 export async function releaseReservation(id: string) {
-  return await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const reservation = await tx.reservation.findUnique({ where: { id } });
 
     if (!reservation) throw new ReservationNotFoundError();
@@ -98,4 +124,11 @@ export async function releaseReservation(id: string) {
       include: { product: true, warehouse: true },
     });
   });
+
+  const redis = getRedis()
+  if (redis) {
+    try { await redis.zrem('reservations', id) } catch { /* ignore */ }
+  }
+
+  return result
 }
