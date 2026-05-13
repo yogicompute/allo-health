@@ -8,6 +8,7 @@ curl -s -X POST http://localhost:3000/api/reservations \
 
 wait
 
+E.G.
 
 curl -s -X POST http://localhost:3000/api/reservations \
   -H "Content-Type: application/json" \

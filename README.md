@@ -431,6 +431,64 @@ With more time, I would add:
 
 ---
 
+# Race Condition Testing
+
+This project includes a simple concurrency test to validate atomic inventory reservations.
+
+The goal is to simulate multiple users attempting to reserve the same inventory simultaneously.
+
+---
+
+## race-condition-check.txt
+
+```bash
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"<id>","warehouseId":"<id>","quantity":1}' &
+
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"<id>","warehouseId":"<id>","quantity":1}' &
+
+wait
+```
+
+---
+
+## Example
+
+```bash
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"cmp4esa480003ps0q75u2arhi","warehouseId":"cmp4es9qu0001ps0qnvo9dfsu","quantity":1}' &
+
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"cmp4esa480003ps0q75u2arhi","warehouseId":"cmp4es9qu0001ps0qnvo9dfsu","quantity":1}' &
+
+wait
+```
+
+---
+
+## What This Test Verifies
+
+This test validates that:
+
+- stock reservations are atomic
+- overselling does not happen
+- concurrent requests are handled safely
+- only valid reservations succeed
+- inventory consistency is preserved under contention
+
+Expected behavior:
+- one request succeeds
+- the second request fails with `409 insufficient stock` when inventory is exhausted
+
+This is a practical way to validate race-condition handling without requiring heavy load-testing tools.
+
+---
+
 # Useful Commands
 
 ## Run Development Server
