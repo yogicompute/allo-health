@@ -1,223 +1,482 @@
 # allo-health
 
-Inventory reservation demo built with Next.js + Prisma + Postgres, including reservation expiry and Upstash Redis acceleration.
+Inventory reservation system built with Next.js, Prisma, PostgreSQL, and Redis.  
+Supports real-time stock reservation, automatic expiry handling, reservation confirmation, and fail-safe stock recovery.
 
-## Tech stack
+Designed with production-style backend patterns:
+- atomic reservation handling
+- expiry-safe workflows
+- Redis accelerated scans
+- DB fallback reliability
+- lazy expiry recovery
 
+---
+
+# Overview
+
+This project demonstrates how e-commerce or healthcare inventory systems can safely reserve stock for users during checkout.
+
+Instead of immediately deducting inventory, the system creates a temporary reservation (`PENDING`) with a TTL (time-to-live). Users can:
+- confirm purchase
+- cancel reservation
+- or let it expire automatically
+
+Expired reservations automatically release inventory back into stock.
+
+---
+
+# Tech Stack
+
+## Frontend
 - Next.js (App Router)
 - React
-- Prisma + PostgreSQL
-- Upstash Redis (optional but recommended for expiry scans)
+- Tailwind CSS
 
-## Local setup
+## Backend
+- Next.js API Routes
+- Prisma ORM
+- PostgreSQL
 
-### 1) Prerequisites
+## Infrastructure
+- Upstash Redis
+- Cron-based expiry worker
 
-- Node.js 20+
-- Postgres instance
-- Upstash Redis database (optional for local, required to match production behavior)
+---
 
-### 2) Environment variables
+# Key Features
 
-Create `.env` in project root:
+- Inventory reservation with expiry
+- Atomic stock locking
+- Reservation confirmation flow
+- Reservation cancellation flow
+- Automatic stock recovery
+- Redis accelerated expiry lookup
+- Database fallback mechanism
+- Lazy expiry protection
+- Production-oriented error handling
 
-```env
-# Postgres used by app runtime
-DATABASE_URL="postgres://user:password@localhost:5432/allo_health"
+---
 
-# Postgres used by Prisma migrations/CLI
-DIRECT_URL="postgres://user:password@localhost:5432/allo_health"
+# Reservation Lifecycle
 
-# Reservation hold duration (10 min default)
-RESERVATION_TTL_MS="600000"
-
-# Protects cron endpoint
-CRON_SECRET="replace-with-a-strong-secret"
-
-# Upstash Redis (optional locally, recommended)
-UPSTASH_REDIS_REST_URL="https://<your-upstash-endpoint>"
-UPSTASH_REDIS_REST_TOKEN="<your-upstash-token>"
+```text
+PENDING
+   │
+   ├── CONFIRMED
+   │
+   ├── RELEASED
+   │
+   └── EXPIRED → RELEASED
 ```
 
-Notes:
-- If Redis vars are missing, app still runs. Expiry falls back to DB scanning.
-- `DATABASE_URL` and `DIRECT_URL` can point to the same database in local dev.
+---
 
-### 3) Install dependencies
+# System Flow
+
+```mermaid
+flowchart TD
+
+    %% =========================
+    %% USER RESERVATION FLOW
+    %% =========================
+
+    A([User Opens App]) --> B[Browse Products]
+    B --> C[Select Warehouse & Quantity]
+    C --> D[Create Reservation Request]
+
+    D --> E{Stock Available?}
+
+    E -->|No| F[[409 Insufficient Stock]]
+
+    E -->|Yes| G[Create PENDING Reservation]
+    G --> H[Increase reservedUnits]
+    H --> I[Store Expiry in Redis ZSET]
+    I --> J[Redirect to Checkout Page]
+
+    %% =========================
+    %% USER ACTIONS
+    %% =========================
+
+    J --> K{User Action}
+
+    K -->|Confirm Purchase| L[Confirm Reservation API]
+    K -->|Cancel Reservation| M[Release Reservation API]
+    K -->|No Action| N[Wait Until Expiry]
+
+    %% =========================
+    %% CONFIRM FLOW
+    %% =========================
+
+    L --> O{Reservation Still Valid?}
+
+    O -->|No| P[[410 Reservation Expired]]
+
+    O -->|Yes| Q[Decrease totalUnits]
+    Q --> R[Decrease reservedUnits]
+    R --> S[Mark Reservation CONFIRMED]
+    S --> T[Remove Reservation from Redis]
+    T --> U([Purchase Completed])
+
+    %% =========================
+    %% MANUAL RELEASE FLOW
+    %% =========================
+
+    M --> V[Decrease reservedUnits]
+    V --> W[Mark Reservation RELEASED]
+    W --> X[Remove Reservation from Redis]
+    X --> Y([Reservation Cancelled])
+
+    %% =========================
+    %% EXPIRY / CRON FLOW
+    %% =========================
+
+    N --> Z[Cron Job Runs]
+
+    Z --> AA{Redis Available?}
+
+    AA -->|Yes| AB[Fetch Expired IDs from Redis]
+    AA -->|No| AC[Query Expired PENDING Rows from DB]
+
+    AB --> AD[Release Expired Reservations]
+    AC --> AD
+
+    AD --> AE[Decrease reservedUnits]
+    AE --> AF[Mark Reservation RELEASED]
+    AF --> AG[Cleanup Redis Entries]
+
+    AG --> AH([Expiry Process Complete])
+```
+
+---
+
+# Local Setup
+
+## 1. Clone Repository
+
+```bash
+git clone <your-repo-url>
+cd allo-health
+```
+
+---
+
+## 2. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 4) Run migrations
+---
+
+## 3. Configure Environment Variables
+
+Create a `.env` file:
+
+```env
+# PostgreSQL
+DATABASE_URL="postgres://user:password@localhost:5432/allo_health"
+
+# Prisma CLI
+DIRECT_URL="postgres://user:password@localhost:5432/allo_health"
+
+# Reservation expiry duration
+RESERVATION_TTL_MS="600000"
+
+# Protects cron endpoint
+CRON_SECRET="your-secret"
+
+# Redis
+UPSTASH_REDIS_REST_URL="https://your-upstash-url"
+UPSTASH_REDIS_REST_TOKEN="your-upstash-token"
+```
+
+---
+
+## 4. Run Database Migration
 
 ```bash
 npx prisma migrate dev
 ```
 
-### 5) Seed data
+---
+
+## 5. Seed Database
 
 ```bash
 npm run db:seed
 ```
 
-### 6) Start app
+---
+
+## 6. Start Development Server
 
 ```bash
 npm run dev
 ```
 
-Open http://localhost:3000
+Open:
 
-## User flow summary
-
-User browses products, selects warehouse + quantity, creates a reservation (`PENDING`), and is redirected to reservation checkout page. User can confirm purchase before expiry (`CONFIRMED`) or cancel (`RELEASED`). If user does nothing, reservation expires and stock is released.
-
-## App flow chart
-
-```mermaid
-flowchart TD
-		A[User opens Products page] --> B[View product availability]
-		B --> C[POST /api/reservations]
-		C --> D{Stock available?}
-		D -->|No| E[Return 409 insufficient stock]
-		D -->|Yes| F[Create PENDING reservation in DB]
-		F --> G[Track reservation in Redis ZSET]
-		G --> H[Redirect to /reservations/:id]
-
-		H --> I{User action}
-		I -->|Confirm| J[POST /api/reservations/:id/confirm]
-		I -->|Cancel| K[POST /api/reservations/:id/release]
-		I -->|No action| L[Time passes]
-
-		J --> M{Still PENDING and not expired?}
-		M -->|Yes| N[Decrement totalUnits and reservedUnits]
-		N --> O[Mark reservation CONFIRMED]
-		O --> P[Remove id from Redis ZSET]
-		M -->|No| Q[Return error 410/400]
-
-		K --> R[Decrement reservedUnits]
-		R --> S[Mark reservation RELEASED]
-		S --> T[Remove id from Redis ZSET]
-
-		L --> U[Cron GET /api/cron/expire-reservations]
-		U --> V{Redis configured?}
-		V -->|Yes| W[Fetch expired ids from ZSET by score]
-		V -->|No| X[Find expired PENDING rows in DB]
-		W --> Y[releaseReservation(id) for each]
-		X --> Y
-		Y --> Z[Return released/failed counts]
+```text
+http://localhost:3000
 ```
 
-## Expiry mechanism in production
+---
 
-Expiry is implemented with a layered strategy:
+# How Reservation Expiry Works
 
-1. Active expiry via cron endpoint
-	 - Route: `GET /api/cron/expire-reservations`
-	 - Requires header: `Authorization: Bearer <CRON_SECRET>`
-	 - Scheduler (Vercel Cron, external cron, or worker) calls it on an interval (for example every minute).
+This project uses a layered expiry strategy for reliability.
 
-2. Redis-accelerated expiry lookup
-	 - On reservation create, reservation id is added to Redis sorted set `reservations` with score = `expiresAt` timestamp.
-	 - Cron reads expired ids by score and releases them.
-	 - On confirm/release, id is removed from Redis.
+## 1. Redis Expiry Index
 
-3. Safe fallback
-	 - If Redis is not configured or fails, cron falls back to DB query (`PENDING` + `expiresAt < now`) and releases those reservations.
+Every reservation is added to a Redis Sorted Set:
 
-4. Lazy expiry safeguard
-	 - When fetching reservation details, if a reservation is still `PENDING` but already expired, app releases it immediately.
-	 - This ensures correctness even if cron is delayed.
+```text
+key: reservations
+score: expiresAt timestamp
+value: reservationId
+```
 
-## Routes and how they work
+This allows extremely fast lookup of expired reservations.
 
-### UI routes
+---
 
-- `GET /`
-	- Renders products and stock availability.
-	- Data source: Postgres via Prisma.
+## 2. Cron-based Cleanup
 
-- `GET /reservations/:id`
-	- Shows reservation checkout state and countdown.
-	- Performs lazy expiry check for expired `PENDING` reservations.
+A cron endpoint runs periodically:
 
-### API routes
+```text
+GET /api/cron/expire-reservations
+```
 
-- `GET /api/products`
-	- Returns products + stock + computed `availableUnits`.
+The worker:
+- fetches expired reservation IDs
+- releases stock
+- updates DB state
+- removes Redis entries
 
-- `GET /api/warehouses`
-	- Returns warehouses ordered by name.
+---
 
-- `POST /api/reservations`
-	- Body: `{ productId, warehouseId, quantity }`
-	- Validates input, atomically reserves stock, creates `PENDING` reservation with TTL.
-	- Redis: adds reservation id to expiry ZSET (best effort).
+## 3. Database Fallback
 
-- `GET /api/reservations/:id`
-	- Returns reservation by id.
-	- If expired and still `PENDING`, releases it first (lazy expiry).
+If Redis fails or is unavailable:
+- the system scans PostgreSQL directly
+- expired reservations are still released safely
 
-- `POST /api/reservations/:id/confirm`
-	- Confirms reservation if valid and not expired.
-	- Stock update: decrements both `totalUnits` and `reservedUnits`.
-	- Redis: removes reservation id from ZSET.
+This makes PostgreSQL the ultimate source of truth.
 
-- `POST /api/reservations/:id/release`
-	- Releases reservation hold.
-	- Stock update: decrements `reservedUnits`.
-	- Redis: removes reservation id from ZSET.
+---
 
-- `GET /api/cron/expire-reservations`
-	- Protected by `CRON_SECRET` bearer token.
-	- Expires stale reservations in batch using Redis first, DB fallback second.
-	- Returns `{ ok, released, failed }`.
+## 4. Lazy Expiry Protection
 
-### Error handling behavior
+Even if cron is delayed:
+- opening a reservation page checks expiry
+- expired reservations are instantly released
 
-Standard API mapping via shared error handler:
+This prevents stale reservations from blocking inventory.
 
-- `409` insufficient stock
-- `410` reservation expired
-- `404` reservation not found
-- `400` invalid reservation status
-- `500` internal server error
+---
 
-## Trade-offs and what I'd improve with more time
+# API Routes
 
-Trade-offs made:
+## Products
 
-- Best-effort Redis updates
-	- Redis write/remove failures do not fail main DB transaction.
-	- Pro: checkout remains reliable even if Redis is transiently down.
-	- Con: Redis index can become temporarily stale.
+### `GET /api/products`
 
-- Dual expiry strategy (cron + lazy)
-	- Pro: correctness preserved even with scheduler delay.
-	- Con: some expiry work is deferred to read-time.
+Returns:
+- products
+- stock
+- available inventory
 
-- DB as source of truth
-	- Pro: consistency and durability remain in Postgres.
-	- Con: cron fallback can be heavier than pure queue-driven expiry.
+---
 
-With more time, I would:
+## Warehouses
 
-- Add distributed lock around cron execution to avoid overlap under retries/concurrency.
-- Add idempotency handling for reservation create/confirm/release endpoints.
-- Add request tracing/metrics around expiry success/fail counts and Redis fallback rate.
-- Add integration tests for race conditions and expiry edge cases.
-- Add periodic cleanup for old idempotency keys and historical reservations.
+### `GET /api/warehouses`
 
-## Useful commands
+Returns all warehouses.
+
+---
+
+## Create Reservation
+
+### `POST /api/reservations`
+
+Request:
+
+```json
+{
+  "productId": "1",
+  "warehouseId": "2",
+  "quantity": 3
+}
+```
+
+Behavior:
+- validates stock
+- creates `PENDING` reservation
+- increases `reservedUnits`
+- stores expiry in Redis
+
+---
+
+## Fetch Reservation
+
+### `GET /api/reservations/:id`
+
+Returns reservation details.
+
+Also performs lazy expiry check.
+
+---
+
+## Confirm Reservation
+
+### `POST /api/reservations/:id/confirm`
+
+Behavior:
+- validates reservation
+- deducts inventory
+- marks reservation `CONFIRMED`
+- removes Redis tracking
+
+---
+
+## Release Reservation
+
+### `POST /api/reservations/:id/release`
+
+Behavior:
+- releases reserved stock
+- marks reservation `RELEASED`
+- removes Redis entry
+
+---
+
+## Expiry Worker
+
+### `GET /api/cron/expire-reservations`
+
+Protected using:
+
+```text
+Authorization: Bearer <CRON_SECRET>
+```
+
+Behavior:
+- finds expired reservations
+- releases inventory
+- returns cleanup statistics
+
+---
+
+# Error Handling
+
+| Status Code | Meaning |
+|---|---|
+| 400 | Invalid reservation state |
+| 404 | Reservation not found |
+| 409 | Insufficient stock |
+| 410 | Reservation expired |
+| 500 | Internal server error |
+
+---
+
+# Design Decisions
+
+## PostgreSQL as Source of Truth
+
+Redis is treated as an optimization layer.
+
+Why:
+- durability
+- consistency
+- crash safety
+
+---
+
+## Best-effort Redis Writes
+
+Redis failures do not fail checkout.
+
+Why:
+- reservation integrity matters more than cache consistency
+
+Tradeoff:
+- temporary Redis staleness possible
+
+---
+
+## Dual Expiry Protection
+
+Using:
+- cron cleanup
+- lazy expiry
+
+Why:
+- guarantees eventual consistency
+
+---
+
+# Scalability Improvements
+
+With more time, I would add:
+
+- distributed locking for cron workers
+- idempotency keys
+- retry-safe reservation APIs
+- observability + metrics
+- queue-based expiry workers
+- integration tests for race conditions
+- reservation analytics dashboard
+
+---
+
+# Useful Commands
+
+## Run Development Server
 
 ```bash
-# run
 npm run dev
+```
 
-# Build
+## Build Project
+
+```bash
 npm run build
+```
 
-# Re-seed local database
+## Seed Database
+
+```bash
 npm run db:seed
 ```
+
+---
+
+# Production Notes
+
+Recommended production setup:
+
+- Vercel / Docker deployment
+- Managed PostgreSQL
+- Upstash Redis
+- Scheduled cron execution every minute
+- Monitoring + tracing
+
+---
+
+# Why This Architecture?
+
+This architecture is designed to solve a real production problem:
+
+> Prevent overselling inventory while still allowing smooth checkout experiences.
+
+The system prioritizes:
+- consistency
+- fault tolerance
+- recovery safety
+- operational simplicity
+
+Basically:
+your stock system should not explode because someone refreshed checkout 17 times like a speedrunner possessed by chaos. 💀
+
