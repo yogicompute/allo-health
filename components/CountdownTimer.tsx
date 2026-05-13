@@ -7,7 +7,7 @@ export default function CountdownTimer({
   onExpire,
 }: {
   expiresAt: string
-  onExpire: () => void
+  onExpire: () => void | Promise<void>
 }) {
   const [ms, setMs] = useState(() => Math.max(0, new Date(expiresAt).getTime() - Date.now()))
 
@@ -17,7 +17,7 @@ export default function CountdownTimer({
       setMs(left)
       if (left === 0) {
         clearInterval(tick)
-        onExpire()
+        void onExpire()
       }
     }, 500)
     return () => clearInterval(tick)

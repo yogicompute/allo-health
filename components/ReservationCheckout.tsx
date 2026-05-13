@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import CountdownTimer from './CountdownTimer'
@@ -21,8 +21,23 @@ export default function ReservationCheckout({ reservation: initial }: { reservat
   const router = useRouter()
   const [status, setStatus]   = useState(initial.status)
   const [loading, setLoading] = useState<'confirm' | 'cancel' | null>(null)
+  const statusRef = useRef(initial.status)
 
-  const handleExpire = useCallback(() => setStatus('RELEASED'), [])
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
+
+  const handleExpire = useCallback(async () => {
+    if (statusRef.current !== 'PENDING') return
+
+    try {
+      await fetch(`/api/reservations/${initial.id}/release`, { method: 'POST' })
+    } catch {
+      // The cron job and lazy expiry path still provide a backend fallback.
+    } finally {
+      setStatus('RELEASED')
+    }
+  }, [initial.id])
 
   async function handleConfirm() {
     setLoading('confirm')

@@ -1,0 +1,20 @@
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"<id>","warehouseId":"<id>","quantity":1}' &
+
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"<id>","warehouseId":"<id>","quantity":1}' &
+
+wait
+
+
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"cmp4esa480003ps0q75u2arhi","warehouseId":"cmp4es9qu0001ps0qnvo9dfsu","quantity":1}' &
+
+curl -s -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"productId":"cmp4esa480003ps0q75u2arhi","warehouseId":"cmp4es9qu0001ps0qnvo9dfsu","quantity":1}' &
+
+wait
