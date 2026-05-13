@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { apiSuccess } from '@/lib/api-response'
 import { withErrorHandler } from '@/lib/with-error-handler'
 import { ReservationNotFoundError } from '@/lib/errors'
+import { releaseReservation } from '@/lib/reservation-service'
 
 export const GET = withErrorHandler(
   async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
@@ -10,35 +11,15 @@ export const GET = withErrorHandler(
 
     const reservation = await prisma.reservation.findUnique({
       where: { id },
-      include: {
-        product:   true,
-        warehouse: true,
-      },
+      include: { product: true, warehouse: true },
     })
 
     if (!reservation) throw new ReservationNotFoundError()
 
-    // Lazy expiry check — if expired and still PENDING, mark it released
+    // Lazy expiry
     if (reservation.status === 'PENDING' && reservation.expiresAt < new Date()) {
-      const updated = await prisma.$transaction(async (tx) => {
-        await tx.stock.update({
-          where: {
-            productId_warehouseId: {
-              productId:   reservation.productId,
-              warehouseId: reservation.warehouseId,
-            },
-          },
-          data: { reservedUnits: { decrement: reservation.quantity } },
-        })
-
-        return tx.reservation.update({
-          where: { id },
-          data:  { status: 'RELEASED', releasedAt: new Date() },
-          include: { product: true, warehouse: true },
-        })
-      })
-
-      return apiSuccess(updated)
+      const released = await releaseReservation(id)
+      return apiSuccess(released)
     }
 
     return apiSuccess(reservation)
